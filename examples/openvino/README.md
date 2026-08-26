@@ -29,6 +29,20 @@ python verify.py silero_vad_8k.onnx --sr 8000 "../c++/aepyx_8k.wav"
 
 `convert.py` defaults to the model shipped in this repo. `verify.py` compares the converted model against the stock one with chained state, on synthetic audio and on any 16 bit mono wav files you pass, and checks that the resulting speech segmentation is identical. It exits nonzero if anything is off.
 
+## Converting older v4 / v5 exports
+
+`convert.py` assumes the current (v5/v6) I/O: `input` / `state` / `sr` → `output` / `stateN`, with context already concatenated on `input`.
+
+v4 uses a different contract (`input` / `h` / `c` / `sr` → `output` / `hn` / `cn`, raw window, no context). Use `convert_single_rate.py` to specialize any of v4 / v5 / v6 to a single rate with no `sr` and no `If`:
+
+```
+# download a tagged stock model first, then:
+python convert_single_rate.py path/to/v4_silero_vad.onnx -o v4_16k_single.onnx --sr 16000 --window 512 --verify
+python convert_single_rate.py path/to/v5_silero_vad.onnx -o v5_16k_single.onnx --sr 16000 --verify
+```
+
+`--verify` checks bit-exact agreement against the stock graph in onnxruntime over chained streaming chunks. By default the converter also runs `onnxsim.simplify`; pass `--no-simplify` to skip it.
+
 ## Set inference precision to f32
 
 On CPUs with bf16 support (AMX or AVX512 BF16) the OpenVINO CPU plugin defaults to bf16 inference. For this model that is not a harmless accuracy tradeoff: the per chunk error compounds through the recurrent state until the speech segmentation actually changes. On real audio the default gave max abs diffs up to 3e-1 against the stock model, while f32 gives 2e-6. Always compile with:
