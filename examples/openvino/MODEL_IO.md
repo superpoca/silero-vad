@@ -1,56 +1,66 @@
 # Silero VAD 16 kHz 单速率 ONNX 模型：输入输出与使用说明
 
-本文描述仓库中三个已经特化到 **16 kHz、batch=1、无 `sr` 输入** 的 ONNX 模型：
+本文描述仓库中三个已经特化到 **16 kHz、batch=1、无** `sr` **输入** 的 ONNX 模型：
 
-| 文件 | 来源权重 | 转换脚本 | 体积 |
-| --- | --- | --- | --- |
-| `examples/openvino/models/v4_16k_single.onnx` | 官方 v4 `silero_vad.onnx` | `convert_single_rate.py`（含 onnxsim） | 621 KiB |
-| `examples/openvino/models/v5_16k_single.onnx` | 官方 v5 `silero_vad.onnx` | `convert_single_rate.py`（含 onnxsim） | 1.19 MiB |
-| `src/silero_vad/data/silero_vad_openvino_16k.onnx` | 当前仓库 `silero_vad.onnx`（v5/v6 I/O，现行权重） | `convert.py`（无 onnxsim） | 1.23 MiB |
+
+| 文件                                                 | 来源权重                                   | 转换脚本                                | 体积       |
+| -------------------------------------------------- | -------------------------------------- | ----------------------------------- | -------- |
+| `examples/openvino/models/v4_16k_single.onnx`      | 官方 v4 `silero_vad.onnx`                | `convert_single_rate.py`（含 onnxsim） | 621 KiB  |
+| `examples/openvino/models/v5_16k_single.onnx`      | 官方 v5 `silero_vad.onnx`                | `convert_single_rate.py`（含 onnxsim） | 1.19 MiB |
+| `src/silero_vad/data/silero_vad_openvino_16k.onnx` | 当前仓库 `silero_vad.onnx`（v5/v6 I/O，现行权重） | `convert.py`（无 onnxsim）             | 1.23 MiB |
+
 
 三者都可以用 ONNX Runtime 或 OpenVINO 直接加载。它们都已经去掉采样率分支（`If`）和 `sr` 输入，并把形状冻成静态，因此可以避开官方双速率图在 OpenVINO 上无法推断 Conv 静态 rank 的问题。
 
-**不要把 `v5_16k_single.onnx` 和 `silero_vad_openvino_16k.onnx` 当成同一套权重。** 二者 I/O 契约相同，但权重不同，数值结果不可互换。各自与对应的源模型在 ONNX Runtime 上流式串联状态时是 **bit-exact**（max abs diff = 0）。
+**不要把** `v5_16k_single.onnx` **和** `silero_vad_openvino_16k.onnx` **当成同一套权重。** 二者 I/O 契约相同，但权重不同，数值结果不可互换。各自与对应的源模型在 ONNX Runtime 上流式串联状态时是 **bit-exact**（max abs diff = 0）。
 
 ---
 
+
+
 ## 1. 总览对比
 
-| 项目 | `v4_16k_single.onnx` | `v5_16k_single.onnx` | `silero_vad_openvino_16k.onnx` |
-| --- | --- | --- | --- |
-| 架构代际 | Silero VAD v4 | Silero VAD v5 | 当前仓库模型（v5/v6 I/O） |
-| 采样率 | 16 kHz 专用 | 16 kHz 专用 | 16 kHz 专用 |
-| 每步新音频 | 512 samples（32 ms） | 512 samples（32 ms） | 512 samples（32 ms） |
-| 是否拼接 context | **否**，直接喂窗口 | **是**，64 + 512 | **是**，64 + 512 |
-| `input` 形状 | `float32 [1, 512]` | `float32 [1, 576]` | `float32 [1, 576]` |
-| RNN 状态 | 分离的 `h` / `c` | 堆叠的 `state` | 堆叠的 `state` |
-| 状态形状 | `h,c: float32 [2, 1, 64]` | `state: float32 [2, 1, 128]` | `state: float32 [2, 1, 128]` |
-| LSTM | 2 层，hidden=64 | 1 层，hidden=128 | 1 层，hidden=128 |
-| 输出概率 | `output: float32 [1, 1]` | 同左 | 同左 |
-| 下一状态 | `hn`, `cn` | `stateN` | `stateN` |
-| 图节点 / initializer | 73 / 54 | 35 / 27 | 167 / 0（权重在 Constant 节点里） |
-| ONNX opset | 16 | 16 | 16 |
-| 控制流节点 | 无 `If`/`Loop`/`Scan` | 无 | 无 |
-| `sr` 输入 | 已删除 | 已删除 | 已删除 |
-| batch | 固定 1 | 固定 1 | 固定 1 |
+
+| 项目                | `v4_16k_single.onnx`      | `v5_16k_single.onnx`         | `silero_vad_openvino_16k.onnx` |
+| ----------------- | ------------------------- | ---------------------------- | ------------------------------ |
+| 架构代际              | Silero VAD v4             | Silero VAD v5                | 当前仓库模型（v5/v6 I/O）              |
+| 采样率               | 16 kHz 专用                 | 16 kHz 专用                    | 16 kHz 专用                      |
+| 每步新音频             | 512 samples（32 ms）        | 512 samples（32 ms）           | 512 samples（32 ms）             |
+| 是否拼接 context      | **否**，直接喂窗口               | **是**，64 + 512               | **是**，64 + 512                 |
+| `input` 形状        | `float32 [1, 512]`        | `float32 [1, 576]`           | `float32 [1, 576]`             |
+| RNN 状态            | 分离的 `h` / `c`             | 堆叠的 `state`                  | 堆叠的 `state`                    |
+| 状态形状              | `h,c: float32 [2, 1, 64]` | `state: float32 [2, 1, 128]` | `state: float32 [2, 1, 128]`   |
+| LSTM              | 2 层，hidden=64             | 1 层，hidden=128               | 1 层，hidden=128                 |
+| 输出概率              | `output: float32 [1, 1]`  | 同左                           | 同左                             |
+| 下一状态              | `hn`, `cn`                | `stateN`                     | `stateN`                       |
+| 图节点 / initializer | 73 / 54                   | 35 / 27                      | 167 / 0（权重在 Constant 节点里）      |
+| ONNX opset        | 16                        | 16                           | 16                             |
+| 控制流节点             | 无 `If`/`Loop`/`Scan`      | 无                            | 无                              |
+| `sr` 输入           | 已删除                       | 已删除                          | 已删除                            |
+| batch             | 固定 1                      | 固定 1                         | 固定 1                           |
+
 
 输入输出名称必须按上表精确匹配；ONNX Runtime / OpenVINO 都按名字喂张量。
 
 ---
 
+
+
 ## 2. 音频预处理（三个模型共用）
 
 模型内部已经包含 STFT / 编码器，**不要**再自己做梅尔谱或额外标准化。调用方只需要提供波形。
 
-| 项目 | 要求 |
-| --- | --- |
-| 声道 | 单声道。多声道需先混音或取一轨 |
-| 采样率 | **必须 16 000 Hz**。这些图已经砍掉 8 kHz 分支，错采样率会得到无意义结果 |
-| dtype | `float32` |
-| 数值范围 | PCM 线性幅度，官方封装使用 `int16 / 32768.0`，即大约 `[-1, 1]` |
-| 布局 | `[batch=1, time]`，时间维在最后 |
-| 步进 | 非重叠窗口，每 32 ms 推进一步（512 samples） |
-| 尾块 | 不足 512 时在右侧零填充 |
+
+| 项目    | 要求                                              |
+| ----- | ----------------------------------------------- |
+| 声道    | 单声道。多声道需先混音或取一轨                                 |
+| 采样率   | **必须 16 000 Hz**。这些图已经砍掉 8 kHz 分支，错采样率会得到无意义结果  |
+| dtype | `float32`                                       |
+| 数值范围  | PCM 线性幅度，官方封装使用 `int16 / 32768.0`，即大约 `[-1, 1]` |
+| 布局    | `[batch=1, time]`，时间维在最后                        |
+| 步进    | 非重叠窗口，每 32 ms 推进一步（512 samples）                 |
+| 尾块    | 不足 512 时在右侧零填充                                  |
+
 
 16 kHz 下的时间换算：
 
@@ -60,15 +70,21 @@
 
 ---
 
+
+
 ## 3. `v4_16k_single.onnx`
+
+
 
 ### 3.1 输入
 
-| 名称 | dtype | 形状 | 含义 |
-| --- | --- | --- | --- |
-| `input` | `float32` | `[1, 512]` | 当前 32 ms 单声道波形。**不要**拼接上一窗尾部 |
-| `h` | `float32` | `[2, 1, 64]` | 2 层 LSTM 的 hidden state。dim0=层数，dim1=batch，dim2=hidden |
-| `c` | `float32` | `[2, 1, 64]` | 对应的 cell state |
+
+| 名称      | dtype     | 形状           | 含义                                                     |
+| ------- | --------- | ------------ | ------------------------------------------------------ |
+| `input` | `float32` | `[1, 512]`   | 当前 32 ms 单声道波形。**不要**拼接上一窗尾部                           |
+| `h`     | `float32` | `[2, 1, 64]` | 2 层 LSTM 的 hidden state。dim0=层数，dim1=batch，dim2=hidden |
+| `c`     | `float32` | `[2, 1, 64]` | 对应的 cell state                                         |
+
 
 新流开始时：
 
@@ -81,11 +97,15 @@ c = np.zeros((2, 1, 64), np.float32)
 
 ### 3.2 输出
 
-| 名称 | dtype | 形状 | 含义 |
-| --- | --- | --- | --- |
-| `output` | `float32` | `[1, 1]` | 当前窗语音概率，经过 Sigmoid，范围约 `[0, 1]` |
-| `hn` | `float32` | `[2, 1, 64]` | 下一窗的 `h` |
-| `cn` | `float32` | `[2, 1, 64]` | 下一窗的 `c` |
+
+| 名称       | dtype     | 形状           | 含义                              |
+| -------- | --------- | ------------ | ------------------------------- |
+| `output` | `float32` | `[1, 1]`     | 当前窗语音概率，经过 Sigmoid，范围约 `[0, 1]` |
+| `hn`     | `float32` | `[2, 1, 64]` | 下一窗的 `h`                        |
+| `cn`     | `float32` | `[2, 1, 64]` | 下一窗的 `c`                        |
+
+
+
 
 ### 3.3 流式协议
 
@@ -123,6 +143,8 @@ for i in range(0, len(wav), 512):
 
 ---
 
+
+
 ## 4. `v5_16k_single.onnx` 与 `silero_vad_openvino_16k.onnx`
 
 这两个文件的 **I/O 名字、dtype、形状、context 规则完全相同**，调用代码可以共用；只是权重和图优化程度不同。
@@ -134,10 +156,12 @@ for i in range(0, len(wav), 512):
 
 ### 4.1 输入
 
-| 名称 | dtype | 形状 | 含义 |
-| --- | --- | --- | --- |
-| `input` | `float32` | `[1, 576]` | **先 64 点 context，再 512 点新音频**，已经拼好 |
+
+| 名称      | dtype     | 形状            | 含义                                                                                  |
+| ------- | --------- | ------------- | ----------------------------------------------------------------------------------- |
+| `input` | `float32` | `[1, 576]`    | **先 64 点 context，再 512 点新音频**，已经拼好                                                  |
 | `state` | `float32` | `[2, 1, 128]` | LSTM 状态。`state[0]` 为 hidden `h`，`state[1]` 为 cell `c`（`torch.stack([h, c], dim=0)`） |
+
 
 新流开始时：
 
@@ -158,10 +182,12 @@ index:   0 ........... 63 | 64 .......... 575
 
 ### 4.2 输出
 
-| 名称 | dtype | 形状 | 含义 |
-| --- | --- | --- | --- |
-| `output` | `float32` | `[1, 1]` | 当前 32 ms 窗的语音概率，Sigmoid 后约 `[0, 1]` |
-| `stateN` | `float32` | `[2, 1, 128]` | 下一窗的 `state`，必须原样回灌 |
+
+| 名称       | dtype     | 形状            | 含义                                  |
+| -------- | --------- | ------------- | ----------------------------------- |
+| `output` | `float32` | `[1, 1]`      | 当前 32 ms 窗的语音概率，Sigmoid 后约 `[0, 1]` |
+| `stateN` | `float32` | `[2, 1, 128]` | 下一窗的 `state`，必须原样回灌                 |
+
 
 时间戳应对齐 **当前 512 点新音频**，不要把左侧 64 点 context 算进本窗时长。第 `i` 窗（从 0 计）对应采样点 `[i*512, (i+1)*512)`，时间 `[i*0.032, (i+1)*0.032)` 秒。
 
@@ -204,6 +230,8 @@ for i in range(0, len(wav), 512):
     probs.append(float(out[0, 0]))
 ```
 
+
+
 ### 4.5 示例（OpenVINO）
 
 CPU 上若支持 bf16（AMX / AVX512 BF16），OpenVINO CPU plugin 默认会走 bf16。对本模型这不是无害的精度交换：逐步误差会经 LSTM 状态累积，最终改变语音分段。编译时必须强制 f32：
@@ -236,46 +264,84 @@ C++ 对应 `ov::hint::inference_precision(ov::element::f32)`。
 
 ---
 
+
+
 ## 5. 从概率到语音时间戳
 
-模型每窗只给出一个标量概率。官方后处理（`get_speech_timestamps` / `VADIterator`）的默认超参可直接套用：
+模型每窗只给出一个标量概率。官方后处理（`get_speech_timestamps` / `VADIterator`）用带迟滞的状态机把概率序列切成语音段，**不是**「概率曲线过 0.5 的区间」。默认超参可直接套用：
 
-| 参数 | 默认 | 作用 |
-| --- | --- | --- |
-| `threshold` | `0.5` | 进入语音：`prob >= 0.5` |
-| `neg_threshold` | `threshold - 0.15` → `0.35` | 离开语音：已在语音态且 `prob < 0.35` |
-| `min_speech_duration_ms` | 250 | 短于此时长的片段丢弃 |
-| `min_silence_duration_ms` | 100 | 语音结束后再等这段静音才切段 |
-| `speech_pad_ms` | 30 | 段首/段尾各外扩 |
 
-实时场景用 `VADIterator` 同类状态机即可：概率过 `threshold` 报 start，连续低于 `neg_threshold` 且静音够长后报 end。
+| 参数                        | 默认                          | 作用                        |
+| ------------------------- | --------------------------- | ------------------------- |
+| `threshold`               | `0.5`                       | 进入语音：`prob >= 0.5`        |
+| `neg_threshold`           | `threshold - 0.15` → `0.35` | 离开语音：已在语音态且 `prob < 0.35` |
+| `min_speech_duration_ms`  | 250                         | 短于此时长的片段丢弃                |
+| `min_silence_duration_ms` | 100                         | 语音结束后再等这段静音才切段            |
+| `speech_pad_ms`           | 30                          | 段首/段尾各外扩                  |
+
+
+### 5.1 状态机规则
+
+1. **进入语音（start）**
+  第一次 `prob >= 0.5`（不是严格大于）。此时进入语音态。
+2. **迟滞区 `[0.35, 0.5)`**
+  已经在说话时，概率掉到 0.4、0.45 这类值，**仍然算说话**，不会开始计静音。还没开始说话时，这段也不会触发 start。因此语音段里不只是 `>= 0.5` 的部分，也包括中间这些「不够高、也不够低」的窗。
+3. **离开语音（end）**
+  已经在说话，且 `prob < 0.35`，才开始记静音。连续低于 0.35 满 `min_silence_duration_ms`（默认 100 ms）才确认结束。但 `end` 标在**第一次掉到 0.35 以下的那个窗开头**，不是 100 ms 之后。
+4. **100 ms 是确认延迟，默认不计入语音段**
+  它用来防止短暂停顿把一句话切成两段。如果 100 ms 内概率又回到 `>= 0.5`，这次静音作废，整段继续，中间那截低概率会被包进同一段。
+5. **扩边与最短时长**
+  段首、段尾各再垫 `speech_pad_ms`（默认 30 ms）。垫完后总长仍短于 `min_speech_duration_ms`（默认 250 ms）的片段会丢掉。两段之间的空隙若不足 `2 * speech_pad_ms`，则对半分给前后两段，避免重叠。
+
+16 kHz 下模型一步是 32 ms，默认 100 ms 大约要再等 4 个窗（约 128 ms）才确认；确认后仍把 `end` 回写到第一次跌破 0.35 的位置。
+
+默认返回的时长因此大约是：
+
+**第一次 `>= 0.5` 到第一次 `< 0.35`，再加两端各 30 ms。**
+
+不是「`> 0.5` 的时间 + 后面那 100 ms」。
+
+```
+prob
+1.0 |        ████████
+    |      ██        ██
+0.5 |----██------------██----------   ← 进入阈值
+0.35|---──────────────────██-------   ← 离开阈值
+    |                        ████████
+    +--------------------------------→ 时间
+         ^start              ^end
+         第一次>=0.5         第一次<0.35
+                              |← 再等 ≥100ms 才确认
+                              |   这 100ms 默认不算进段
+         |← 最终返回: start-30ms  …  end+30ms →|
+```
+
+实时场景用 `VADIterator` 同类状态机即可：概率过 `threshold` 报 start，连续低于 `neg_threshold` 且静音够长后报 end（时间戳里同样含 30 ms pad）。
 
 ---
+
+
 
 ## 6. 常见错误
 
-1. **v5 / 现行模型只喂 512 点**  
-   图期望 `[1, 576]`。必须自行 concat 64 点 context。v4 才是 `[1, 512]`。
-
-2. **把 v4 的 `h`/`c` 和 v5 的 `state` 混用**  
-   形状和语义都不同：`[2,1,64]`×2 vs `[2,1,128]`。
-
-3. **跨文件复用 RNN 状态**  
-   每个独立音频流都要重置状态（以及 v5 的 context）。
-
-4. **采样率不是 16 kHz**  
-   这些文件没有 `sr` 输入，8 kHz 音频不会自动走另一条分支。需要先重采样。
-
-5. **OpenVINO 未强制 f32**  
-   在 bf16 CPU 上分段结果可能与 ORT 不一致。始终设置 `INFERENCE_PRECISION_HINT=f32`。
-
-6. **batch > 1**  
-   转换时把 batch 冻成 1，部分被内联的 TorchScript 守卫与 batch 有关。不要喂更大的 batch。
-
-7. **把 `v5_16k_single` 当现行官方模型**  
-   与 `silero_vad_openvino_16k.onnx` / 仓库 `silero_vad.onnx` 权重不同，概率序列会对不齐。
+1. **v5 / 现行模型只喂 512 点**
+  图期望 `[1, 576]`。必须自行 concat 64 点 context。v4 才是 `[1, 512]`。
+2. **把 v4 的** `h`**/**`c` **和 v5 的** `state` **混用**
+  形状和语义都不同：`[2,1,64]`×2 vs `[2,1,128]`。
+3. **跨文件复用 RNN 状态**
+  每个独立音频流都要重置状态（以及 v5 的 context）。
+4. **采样率不是 16 kHz**
+  这些文件没有 `sr` 输入，8 kHz 音频不会自动走另一条分支。需要先重采样。
+5. **OpenVINO 未强制 f32**
+  在 bf16 CPU 上分段结果可能与 ORT 不一致。始终设置 `INFERENCE_PRECISION_HINT=f32`。
+6. **batch > 1**
+  转换时把 batch 冻成 1，部分被内联的 TorchScript 守卫与 batch 有关。不要喂更大的 batch。
+7. **把** `v5_16k_single` **当现行官方模型**
+  与 `silero_vad_openvino_16k.onnx` / 仓库 `silero_vad.onnx` 权重不同，概率序列会对不齐。
 
 ---
+
+
 
 ## 7. 与官方双速率图的关系
 
@@ -305,3 +371,4 @@ python convert_single_rate.py path/to/v5_silero_vad.onnx -o v5_16k_single.onnx -
 # 当前仓库模型（默认读 src/silero_vad/data/silero_vad.onnx）
 python convert.py -o ../../src/silero_vad/data/silero_vad_openvino_16k.onnx
 ```
+
